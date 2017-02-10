@@ -2,7 +2,7 @@
 layout: post
 title:  "Write每次最多能写多少字节的数据"
 date:   2016-10-21 14:29:07 +0800
-categories: c kernel
+categories: kernel
 ---
 
 ### 背景
