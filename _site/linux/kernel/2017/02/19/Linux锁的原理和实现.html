@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="en">
+
+  <head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <title>Linux下锁的原理和实现</title>
+  <meta name="description" content="锁能解决什么问题">
+
+  <link rel="stylesheet" href="/assets/main.css">
+  <link rel="canonical" href="http://localhost:4000/linux/kernel/2017/02/19/Linux%E9%94%81%E7%9A%84%E5%8E%9F%E7%90%86%E5%92%8C%E5%AE%9E%E7%8E%B0.html">
+  <link rel="alternate" type="application/rss+xml" title="prototype" href="/feed.xml">
+  
+  
+</head>
+
+
+  <body>
+
+    <header class="site-header" role="banner">
+
+  <div class="wrapper">
+
+    <a class="site-title" href="/">prototype</a>
+
+    <nav class="site-nav">
+      <span class="menu-icon">
+        <svg viewBox="0 0 18 15" width="18px" height="15px">
+          <path fill="#424242" d="M18,1.484c0,0.82-0.665,1.484-1.484,1.484H1.484C0.665,2.969,0,2.304,0,1.484l0,0C0,0.665,0.665,0,1.484,0 h15.031C17.335,0,18,0.665,18,1.484L18,1.484z"/>
+          <path fill="#424242" d="M18,7.516C18,8.335,17.335,9,16.516,9H1.484C0.665,9,0,8.335,0,7.516l0,0c0-0.82,0.665-1.484,1.484-1.484 h15.031C17.335,6.031,18,6.696,18,7.516L18,7.516z"/>
+          <path fill="#424242" d="M18,13.516C18,14.335,17.335,15,16.516,15H1.484C0.665,15,0,14.335,0,13.516l0,0 c0-0.82,0.665-1.484,1.484-1.484h15.031C17.335,12.031,18,12.696,18,13.516L18,13.516z"/>
+        </svg>
+      </span>
+
+      <div class="trigger">
+        
+          
+          <a class="page-link" href="/about/">About</a>
+          
+        
+          
+        
+          
+        
+          
+        
+          
+        
+      </div>
+    </nav>
+
+  </div>
+
+</header>
+
+
+    <main class="page-content" aria-label="Content">
+      <div class="wrapper">
+        <article class="post" itemscope itemtype="http://schema.org/BlogPosting">
+
+  <header class="post-header">
+    <h1 class="post-title" itemprop="name headline">Linux下锁的原理和实现</h1>
+    <p class="post-meta"><time datetime="2017-02-19T16:35:00+08:00" itemprop="datePublished">Feb 19, 2017</time></p>
+  </header>
+
+  <div class="post-content" itemprop="articleBody">
+    <h3 id="锁能解决什么问题">锁能解决什么问题</h3>
+
+<p>在讨论锁的实现机制之前，我们可能需要知道为什么需要锁，锁能解决什么问题？</p>
+
+<p>锁存在的意义在于解决了，多核并发时对于内存数据的操作的一致性的问题（事实上就算单核也有这个问题，因为中断可以影响到线程的执行），俗称ABA问题。</p>
+
+<p>比如下面这段代码：</p>
+
+<div class="language-c highlighter-rouge"><pre class="highlight"><code><span class="cp">#include &lt;pthread.h&gt;
+#include &lt;stdio.h&gt;
+</span>
+<span class="k">static</span> <span class="kt">int</span> <span class="n">count</span><span class="p">;</span>
+<span class="kt">void</span> <span class="o">*</span><span class="nf">add_count</span><span class="p">()</span> <span class="p">{</span>
+    <span class="kt">int</span> <span class="n">i</span><span class="p">;</span>
+    <span class="k">for</span> <span class="p">(</span><span class="n">i</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span> <span class="n">i</span> <span class="o">&lt;</span> <span class="mi">10000</span><span class="p">;</span><span class="n">i</span><span class="o">++</span><span class="p">)</span> <span class="p">{</span>
+        <span class="n">count</span><span class="o">++</span><span class="p">;</span>
+    <span class="p">}</span>
+    <span class="k">return</span> <span class="nb">NULL</span><span class="p">;</span>
+<span class="p">}</span>
+
+<span class="kt">int</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+    <span class="n">count</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span>
+    <span class="n">pthread_t</span> <span class="n">t1</span><span class="p">,</span> <span class="n">t2</span><span class="p">;</span>
+    <span class="n">pthread_create</span><span class="p">(</span><span class="o">&amp;</span><span class="n">t1</span><span class="p">,</span> <span class="nb">NULL</span><span class="p">,</span> <span class="n">add_count</span><span class="p">,</span> <span class="nb">NULL</span><span class="p">);</span>
+    <span class="n">pthread_create</span><span class="p">(</span><span class="o">&amp;</span><span class="n">t2</span><span class="p">,</span> <span class="nb">NULL</span><span class="p">,</span> <span class="n">add_count</span><span class="p">,</span> <span class="nb">NULL</span><span class="p">);</span>
+    <span class="n">pthread_join</span><span class="p">(</span><span class="n">t1</span><span class="p">,</span><span class="nb">NULL</span><span class="p">);</span>
+    <span class="n">pthread_join</span><span class="p">(</span><span class="n">t2</span><span class="p">,</span><span class="nb">NULL</span><span class="p">);</span>
+
+    <span class="n">printf</span><span class="p">(</span><span class="s">"count is %d</span><span class="se">\n</span><span class="s">"</span><span class="p">,</span> <span class="n">count</span><span class="p">);</span>
+<span class="p">}</span>
+</code></pre>
+</div>
+
+<p>这个程序很简单，我起了两个线程，每个线程都对count加一，讲道理结果应该是20000，然后执行的结果并不是，而且每次的结果都不一样。</p>
+
+<p>这是因为count++这个操作并不是原子的，它需要经过以下的步骤：</p>
+
+<ol>
+  <li>首先寄存器把内存中count的值取出存到寄存器</li>
+  <li>对寄存器中的值加一</li>
+  <li>将寄存器中的新值写回到count的内存地址</li>
+</ol>
+
+<p>由于每个线程的寄存器的状态都是独立的，在多个线程并发加一时，假如t1线程加一之后的值还没写回去的时候，t2又读取了地址指向的值，那么接下来t2会将t1写入的值覆盖，数就不对了。</p>
+
+<p>解决这个问题也很简单用锁就可以了，下面是用锁版本的代码：</p>
+
+<div class="language-c highlighter-rouge"><pre class="highlight"><code><span class="cp">#include &lt;pthread.h&gt;
+#include &lt;stdio.h&gt;
+</span>
+<span class="k">static</span> <span class="kt">int</span> <span class="n">count</span><span class="p">;</span>
+<span class="n">pthread_mutex_t</span> <span class="n">m</span><span class="p">;</span>
+<span class="kt">void</span> <span class="o">*</span><span class="nf">add_count</span><span class="p">()</span> <span class="p">{</span>
+    <span class="kt">int</span> <span class="n">i</span><span class="p">;</span>
+    <span class="k">for</span> <span class="p">(</span><span class="n">i</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span> <span class="n">i</span> <span class="o">&lt;</span> <span class="mi">10000</span><span class="p">;</span><span class="n">i</span><span class="o">++</span><span class="p">)</span> <span class="p">{</span>
+        <span class="n">pthread_mutex_lock</span><span class="p">(</span><span class="o">&amp;</span><span class="n">m</span><span class="p">);</span>
+        <span class="n">count</span><span class="o">++</span><span class="p">;</span>
+        <span class="n">pthread_mutex_unlock</span><span class="p">(</span><span class="o">&amp;</span><span class="n">m</span><span class="p">);</span>
+    <span class="p">}</span>
+    <span class="k">return</span> <span class="nb">NULL</span><span class="p">;</span>
+<span class="p">}</span>
+
+<span class="kt">int</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+    <span class="n">count</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span>
+    <span class="n">pthread_t</span> <span class="n">t1</span><span class="p">,</span> <span class="n">t2</span><span class="p">;</span>
+
+    <span class="n">pthread_mutex_init</span><span class="p">(</span><span class="o">&amp;</span><span class="n">m</span><span class="p">,</span><span class="nb">NULL</span><span class="p">);</span>
+
+    <span class="n">pthread_create</span><span class="p">(</span><span class="o">&amp;</span><span class="n">t1</span><span class="p">,</span> <span class="nb">NULL</span><span class="p">,</span> <span class="n">add_count</span><span class="p">,</span> <span class="nb">NULL</span><span class="p">);</span>
+    <span class="n">pthread_create</span><span class="p">(</span><span class="o">&amp;</span><span class="n">t2</span><span class="p">,</span> <span class="nb">NULL</span><span class="p">,</span> <span class="n">add_count</span><span class="p">,</span> <span class="nb">NULL</span><span class="p">);</span>
+    <span class="n">pthread_join</span><span class="p">(</span><span class="n">t1</span><span class="p">,</span><span class="nb">NULL</span><span class="p">);</span>
+    <span class="n">pthread_join</span><span class="p">(</span><span class="n">t2</span><span class="p">,</span><span class="nb">NULL</span><span class="p">);</span>
+
+    <span class="n">printf</span><span class="p">(</span><span class="s">"count is %d</span><span class="se">\n</span><span class="s">"</span><span class="p">,</span> <span class="n">count</span><span class="p">);</span>
+<span class="p">}</span>
+</code></pre>
+</div>
+
+<p>你每次运行它，你会发现结果都是20000，这里我们用了mutex来解决问题，mutex能够提供对于临界区(Critical Section)互斥的访问。</p>
+
+<p>除了mutex之外，还有很多其他机制提供了并发线程对于临界区的同步操作，比如semaphore、spinlock、condition等。</p>
+
+<h3 id="同步原语">同步原语</h3>
+
+<p>锁的实现离不开同步原语的支持，而同步原语可以保证原子性的操作，而同步原语的实现需要硬件的支持。</p>
+
+<h4 id="test_and_set">Test_and_Set</h4>
+
+<p>test_and_set是实现锁的一种原语，它能够提供一种原子性的操作，这个操作可以将内存中的值和你给的值互换</p>
+
+<div class="language-c highlighter-rouge"><pre class="highlight"><code><span class="kt">int</span> <span class="n">test_and_set</span><span class="p">(</span><span class="kt">int</span> <span class="o">*</span><span class="n">p</span><span class="p">,</span><span class="kt">int</span> <span class="n">val</span><span class="p">){</span>
+    <span class="kt">int</span> <span class="n">r</span> <span class="o">=</span> <span class="o">*</span><span class="n">p</span><span class="p">;</span>
+    <span class="o">*</span><span class="n">p</span> <span class="o">=</span> <span class="n">val</span><span class="p">;</span>
+    <span class="k">return</span> <span class="n">r</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre>
+</div>
+
+<p>用c语言来描述就是上面这个样子，test_and_set的实现需要汇编指令前缀lock和指令xchg的支持，lock可以禁止系统总线对于指定内存的访问，而xchg可以交换两个值。</p>
+
+<p>上面的操作其实是原子性的用val的值去和内存中的一个值去做交换，假如我们设定0是未锁，1是锁。</p>
+
+<p>那么初始*p的值都是0表示未锁，假设这时线程t1和t2同时去test_and_set，由于lock的存在所以能够保证不会有两个线程同时lock成功。</p>
+
+<p>假设t1 lock成功，并用1去和内存中的值0交换，得到的值是0，表示t1取到了这把锁，他可以对count进行加一的操作，然后释放锁。</p>
+
+<p>而t2 lock失败，只能继续retry，直到交换出0，表示它得到锁。</p>
+
+<h4 id="compare_and_swap">Compare_and_Swap</h4>
+
+<p>Compare_and_Swap比Test_and_Set更加强大，很多现代的锁等机制都是用CAS来实现的。</p>
+
+<p>CAS的意思就是先比较两个值，假如内存的值等于你给的值1，那么将值2写入到内存中，用c语言来描述是这个样子：</p>
+
+<div class="language-c highlighter-rouge"><pre class="highlight"><code><span class="kt">int</span> <span class="n">compare_and_swap</span><span class="p">(</span><span class="kt">int</span> <span class="o">*</span><span class="n">p</span><span class="p">,</span><span class="kt">int</span> <span class="n">old</span><span class="p">,</span><span class="kt">int</span> <span class="n">new</span><span class="p">){</span>
+    <span class="kt">int</span> <span class="n">r</span> <span class="o">=</span> <span class="o">*</span><span class="n">p</span><span class="p">;</span>
+    <span class="k">if</span><span class="p">(</span><span class="n">r</span> <span class="o">==</span> <span class="n">old</span><span class="p">)</span> <span class="o">*</span><span class="n">p</span> <span class="o">=</span> <span class="n">new</span><span class="p">;</span>
+    <span class="k">return</span> <span class="n">r</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre>
+</div>
+
+<h3 id="实现锁">实现锁</h3>
+
+<p>好了，有了上面的同步原语，那么我们实现锁就方便了,下面我们先来实现一个简单的锁。</p>
+
+<div class="language-c highlighter-rouge"><pre class="highlight"><code><span class="kt">void</span> <span class="nf">lock</span><span class="p">(</span><span class="kt">int</span> <span class="o">*</span><span class="n">p</span><span class="p">)</span> <span class="p">{</span>
+    <span class="k">while</span> <span class="p">(</span><span class="o">!</span><span class="n">__sync_bool_compare_and_swap</span><span class="p">(</span><span class="n">p</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">))</span>
+        <span class="p">;</span>
+<span class="p">}</span>
+
+<span class="kt">void</span> <span class="nf">unlock</span><span class="p">(</span><span class="kt">int</span> <span class="o">*</span><span class="n">p</span><span class="p">)</span> <span class="p">{</span> <span class="o">*</span><span class="n">p</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span> <span class="p">}</span>
+</code></pre>
+</div>
+<p>gcc提供了一些builtins的实现，所以我们可以直接用__sync_bool_compare_and_swap。</p>
+
+<p>在cas的帮助下，我们实现了一把锁，将原始的程序修改如下：</p>
+
+<div class="language-c highlighter-rouge"><pre class="highlight"><code><span class="cp">#include &lt;pthread.h&gt;
+#include &lt;stdio.h&gt;
+#include &lt;stdbool.h&gt;
+</span>
+<span class="k">static</span> <span class="kt">int</span> <span class="n">count</span><span class="p">;</span>
+
+<span class="kt">void</span> <span class="nf">lock</span><span class="p">(</span><span class="kt">int</span> <span class="o">*</span><span class="n">p</span><span class="p">)</span> <span class="p">{</span>
+    <span class="k">while</span> <span class="p">(</span><span class="o">!</span><span class="n">__sync_bool_compare_and_swap</span><span class="p">(</span><span class="n">p</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">))</span>
+        <span class="p">;</span>
+<span class="p">}</span>
+
+<span class="kt">void</span> <span class="nf">unlock</span><span class="p">(</span><span class="kt">int</span> <span class="o">*</span><span class="n">p</span><span class="p">)</span> <span class="p">{</span> <span class="o">*</span><span class="n">p</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span> <span class="p">}</span>
+
+<span class="kt">int</span> <span class="n">lock_t</span><span class="p">;</span>
+
+<span class="kt">void</span> <span class="o">*</span><span class="nf">add_count</span><span class="p">()</span> <span class="p">{</span>
+    <span class="kt">int</span> <span class="n">i</span><span class="p">;</span>
+    <span class="k">for</span> <span class="p">(</span><span class="n">i</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span> <span class="n">i</span> <span class="o">&lt;</span> <span class="mi">10000</span><span class="p">;</span> <span class="n">i</span><span class="o">++</span><span class="p">)</span> <span class="p">{</span>
+        <span class="n">lock</span><span class="p">(</span><span class="o">&amp;</span><span class="n">lock_t</span><span class="p">);</span>
+        <span class="n">count</span><span class="o">++</span><span class="p">;</span>
+        <span class="n">unlock</span><span class="p">(</span><span class="o">&amp;</span><span class="n">lock_t</span><span class="p">);</span>
+    <span class="p">}</span>
+    <span class="k">return</span> <span class="nb">NULL</span><span class="p">;</span>
+<span class="p">}</span>
+
+<span class="kt">int</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+    <span class="n">count</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span>
+    <span class="n">pthread_t</span> <span class="n">t1</span><span class="p">,</span> <span class="n">t2</span><span class="p">;</span>
+
+    <span class="n">lock_t</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span>
+
+    <span class="n">pthread_create</span><span class="p">(</span><span class="o">&amp;</span><span class="n">t1</span><span class="p">,</span> <span class="nb">NULL</span><span class="p">,</span> <span class="n">add_count</span><span class="p">,</span> <span class="nb">NULL</span><span class="p">);</span>
+    <span class="n">pthread_create</span><span class="p">(</span><span class="o">&amp;</span><span class="n">t2</span><span class="p">,</span> <span class="nb">NULL</span><span class="p">,</span> <span class="n">add_count</span><span class="p">,</span> <span class="nb">NULL</span><span class="p">);</span>
+    <span class="n">pthread_join</span><span class="p">(</span><span class="n">t1</span><span class="p">,</span> <span class="nb">NULL</span><span class="p">);</span>
+    <span class="n">pthread_join</span><span class="p">(</span><span class="n">t2</span><span class="p">,</span> <span class="nb">NULL</span><span class="p">);</span>
+
+    <span class="n">printf</span><span class="p">(</span><span class="s">"count is %d</span><span class="se">\n</span><span class="s">"</span><span class="p">,</span> <span class="n">count</span><span class="p">);</span>
+<span class="p">}</span>
+</code></pre>
+</div>
+
+<p>编译运行发现每次结果都是20000，我们的锁实现的没有问题，然而这样代码却导致了一个问题while (!__sync_bool_compare_and_swap(p, 0, 1))。</p>
+
+<p>就是当没有获取到锁的时候，线程是继续试着去抢锁的，事实上这是一个自旋锁(spin lock)。</p>
+
+<p>在临界区很小情况下，自旋锁是很适合的，因为试几次可能就会抢到锁，避免了频繁的上下文切换(context switch)。</p>
+
+<p>而对于临界区很大的情况来说，我们更好的方式是让没取到锁的线程睡眠，假如释放锁的时候还有睡眠的线程在等这个锁，那么唤醒这个线程。</p>
+
+<h3 id="进化">进化</h3>
+
+<p>我们的考虑是这样的，每个去lock这把锁的线程都会有两种结果，假设失败，那么我们准备一个阻塞队列保存所有需要这把锁的线程。</p>
+
+<p>为了解决饿死问题，我们希望搞一个优先级队列，先进入睡眠的线程优先抢到锁。</p>
+
+<p>在取到锁的线程释放锁时检查这个队列时，假如队列不空，那么取出第一个线程并唤醒它。</p>
+
+<div class="language-c highlighter-rouge"><pre class="highlight"><code><span class="cp">#define _GNU_SOURCE
+#include &lt;errno.h&gt;
+#include &lt;pthread.h&gt;
+#include &lt;stdbool.h&gt;
+#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;string.h&gt;
+#include &lt;unistd.h&gt;
+</span>
+<span class="cp">#include &lt;linux/futex.h&gt;
+#include &lt;sys/syscall.h&gt;
+</span>
+<span class="k">static</span> <span class="kt">int</span> <span class="n">count</span><span class="p">;</span>
+<span class="k">struct</span> <span class="n">lock_t</span> <span class="n">_l</span><span class="p">;</span>
+
+<span class="k">static</span> <span class="kt">int</span> <span class="nf">futex</span><span class="p">(</span><span class="kt">int</span> <span class="o">*</span><span class="n">uaddr</span><span class="p">,</span> <span class="kt">int</span> <span class="n">futex_op</span><span class="p">,</span> <span class="kt">int</span> <span class="n">val</span><span class="p">,</span> <span class="k">const</span> <span class="k">struct</span> <span class="n">timespec</span> <span class="o">*</span><span class="n">timeout</span><span class="p">,</span> <span class="kt">int</span> <span class="o">*</span><span class="n">uaddr2</span><span class="p">,</span> <span class="kt">int</span> <span class="n">val3</span><span class="p">)</span> <span class="p">{</span>
+    <span class="k">return</span> <span class="n">syscall</span><span class="p">(</span><span class="n">SYS_futex</span><span class="p">,</span> <span class="n">uaddr</span><span class="p">,</span> <span class="n">futex_op</span><span class="p">,</span> <span class="n">val</span><span class="p">,</span> <span class="n">timeout</span><span class="p">,</span> <span class="n">uaddr</span><span class="p">,</span> <span class="n">val3</span><span class="p">);</span>
+<span class="p">}</span>
+
+<span class="k">struct</span> <span class="n">thread_node</span> <span class="p">{</span>
+    <span class="n">pthread_t</span> <span class="n">id</span><span class="p">;</span>
+    <span class="kt">int</span> <span class="n">flock</span><span class="p">;</span>
+    <span class="n">pthread_t</span> <span class="o">*</span><span class="n">t</span><span class="p">;</span>
+    <span class="k">struct</span> <span class="n">thread_node</span> <span class="o">*</span><span class="n">next</span><span class="p">;</span>
+<span class="p">};</span>
+
+<span class="k">struct</span> <span class="n">lock_t</span> <span class="p">{</span>
+    <span class="kt">int</span> <span class="n">lock</span><span class="p">;</span>
+    <span class="k">struct</span> <span class="n">thread_node</span> <span class="o">*</span><span class="n">node</span><span class="p">;</span>
+<span class="p">};</span>
+
+<span class="kt">void</span> <span class="nf">lock</span><span class="p">(</span><span class="k">struct</span> <span class="n">lock_t</span> <span class="o">*</span><span class="n">l</span><span class="p">)</span> <span class="p">{</span>
+    <span class="k">if</span> <span class="p">(</span><span class="o">!</span><span class="n">__sync_bool_compare_and_swap</span><span class="p">(</span><span class="o">&amp;</span><span class="n">l</span><span class="o">-&gt;</span><span class="n">lock</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">))</span> <span class="p">{</span>
+        <span class="k">struct</span> <span class="n">thread_node</span> <span class="o">*</span><span class="n">n</span> <span class="o">=</span> <span class="n">malloc</span><span class="p">(</span><span class="k">sizeof</span><span class="p">(</span><span class="k">struct</span> <span class="n">thread_node</span><span class="p">));</span>
+        <span class="n">n</span><span class="o">-&gt;</span><span class="n">id</span> <span class="o">=</span> <span class="n">pthread_self</span><span class="p">();</span>
+        <span class="n">n</span><span class="o">-&gt;</span><span class="n">flock</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span>
+        <span class="n">n</span><span class="o">-&gt;</span><span class="n">next</span> <span class="o">=</span> <span class="nb">NULL</span><span class="p">;</span>
+        <span class="k">if</span> <span class="p">(</span><span class="n">l</span><span class="o">-&gt;</span><span class="n">node</span> <span class="o">==</span> <span class="nb">NULL</span><span class="p">)</span>
+            <span class="n">l</span><span class="o">-&gt;</span><span class="n">node</span> <span class="o">=</span> <span class="n">n</span><span class="p">;</span>
+        <span class="k">else</span> <span class="p">{</span>
+            <span class="n">n</span><span class="o">-&gt;</span><span class="n">next</span> <span class="o">=</span> <span class="n">l</span><span class="o">-&gt;</span><span class="n">node</span><span class="p">;</span>
+            <span class="n">l</span><span class="o">-&gt;</span><span class="n">node</span> <span class="o">=</span> <span class="n">n</span><span class="p">;</span>
+        <span class="p">}</span>
+
+        <span class="n">futex</span><span class="p">(</span><span class="o">&amp;</span><span class="n">n</span><span class="o">-&gt;</span><span class="n">flock</span><span class="p">,</span> <span class="n">FUTEX_WAIT</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="nb">NULL</span><span class="p">,</span> <span class="nb">NULL</span><span class="p">,</span> <span class="mi">0</span><span class="p">);</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+
+<span class="kt">void</span> <span class="nf">unlock</span><span class="p">(</span><span class="k">struct</span> <span class="n">lock_t</span> <span class="o">*</span><span class="n">l</span><span class="p">)</span> <span class="p">{</span>
+    <span class="k">if</span> <span class="p">(</span><span class="n">l</span><span class="o">-&gt;</span><span class="n">node</span> <span class="o">!=</span> <span class="nb">NULL</span><span class="p">)</span> <span class="p">{</span>
+        <span class="k">struct</span> <span class="n">thread_node</span> <span class="o">*</span><span class="n">n</span> <span class="o">=</span> <span class="n">l</span><span class="o">-&gt;</span><span class="n">node</span><span class="p">;</span>
+        <span class="n">l</span><span class="o">-&gt;</span><span class="n">node</span> <span class="o">=</span> <span class="n">n</span><span class="o">-&gt;</span><span class="n">next</span><span class="p">;</span>
+        <span class="n">n</span><span class="o">-&gt;</span><span class="n">flock</span> <span class="o">=</span> <span class="mi">1</span><span class="p">;</span>
+
+        <span class="n">futex</span><span class="p">(</span><span class="o">&amp;</span><span class="n">n</span><span class="o">-&gt;</span><span class="n">flock</span><span class="p">,</span> <span class="n">FUTEX_WAKE</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="nb">NULL</span><span class="p">,</span> <span class="nb">NULL</span><span class="p">,</span> <span class="mi">0</span><span class="p">);</span>
+        <span class="n">free</span><span class="p">(</span><span class="n">n</span><span class="p">);</span>
+    <span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+        <span class="n">l</span><span class="o">-&gt;</span><span class="n">lock</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+
+<span class="kt">void</span> <span class="o">*</span><span class="nf">add_count</span><span class="p">()</span> <span class="p">{</span>
+    <span class="kt">int</span> <span class="n">i</span><span class="p">;</span>
+    <span class="k">for</span> <span class="p">(</span><span class="n">i</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span> <span class="n">i</span> <span class="o">&lt;</span> <span class="mi">10000</span><span class="p">;</span> <span class="n">i</span><span class="o">++</span><span class="p">)</span> <span class="p">{</span>
+        <span class="n">lock</span><span class="p">(</span><span class="o">&amp;</span><span class="n">_l</span><span class="p">);</span>
+        <span class="n">count</span><span class="o">++</span><span class="p">;</span>
+        <span class="n">printf</span><span class="p">(</span><span class="s">"%d</span><span class="se">\n</span><span class="s">"</span><span class="p">,</span> <span class="n">count</span><span class="p">);</span>
+        <span class="n">unlock</span><span class="p">(</span><span class="o">&amp;</span><span class="n">_l</span><span class="p">);</span>
+    <span class="p">}</span>
+    <span class="k">return</span> <span class="nb">NULL</span><span class="p">;</span>
+<span class="p">}</span>
+
+<span class="kt">int</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+    <span class="n">count</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span>
+    <span class="n">pthread_t</span> <span class="n">t1</span><span class="p">,</span> <span class="n">t2</span><span class="p">,</span> <span class="n">t3</span><span class="p">,</span> <span class="n">t4</span><span class="p">,</span> <span class="n">t5</span><span class="p">;</span>
+
+    <span class="n">_l</span><span class="p">.</span><span class="n">node</span> <span class="o">=</span> <span class="nb">NULL</span><span class="p">;</span>
+    <span class="n">_l</span><span class="p">.</span><span class="n">lock</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span>
+
+    <span class="n">pthread_create</span><span class="p">(</span><span class="o">&amp;</span><span class="n">t1</span><span class="p">,</span> <span class="nb">NULL</span><span class="p">,</span> <span class="n">add_count</span><span class="p">,</span> <span class="nb">NULL</span><span class="p">);</span>
+    <span class="n">pthread_create</span><span class="p">(</span><span class="o">&amp;</span><span class="n">t2</span><span class="p">,</span> <span class="nb">NULL</span><span class="p">,</span> <span class="n">add_count</span><span class="p">,</span> <span class="nb">NULL</span><span class="p">);</span>
+    <span class="n">pthread_create</span><span class="p">(</span><span class="o">&amp;</span><span class="n">t3</span><span class="p">,</span> <span class="nb">NULL</span><span class="p">,</span> <span class="n">add_count</span><span class="p">,</span> <span class="nb">NULL</span><span class="p">);</span>
+    <span class="n">pthread_create</span><span class="p">(</span><span class="o">&amp;</span><span class="n">t4</span><span class="p">,</span> <span class="nb">NULL</span><span class="p">,</span> <span class="n">add_count</span><span class="p">,</span> <span class="nb">NULL</span><span class="p">);</span>
+    <span class="n">pthread_create</span><span class="p">(</span><span class="o">&amp;</span><span class="n">t5</span><span class="p">,</span> <span class="nb">NULL</span><span class="p">,</span> <span class="n">add_count</span><span class="p">,</span> <span class="nb">NULL</span><span class="p">);</span>
+
+    <span class="n">pthread_join</span><span class="p">(</span><span class="n">t1</span><span class="p">,</span> <span class="nb">NULL</span><span class="p">);</span>
+    <span class="n">pthread_join</span><span class="p">(</span><span class="n">t2</span><span class="p">,</span> <span class="nb">NULL</span><span class="p">);</span>
+    <span class="n">pthread_join</span><span class="p">(</span><span class="n">t3</span><span class="p">,</span> <span class="nb">NULL</span><span class="p">);</span>
+    <span class="n">pthread_join</span><span class="p">(</span><span class="n">t4</span><span class="p">,</span> <span class="nb">NULL</span><span class="p">);</span>
+    <span class="n">pthread_join</span><span class="p">(</span><span class="n">t5</span><span class="p">,</span> <span class="nb">NULL</span><span class="p">);</span>
+
+    <span class="n">printf</span><span class="p">(</span><span class="s">"count is %d</span><span class="se">\n</span><span class="s">"</span><span class="p">,</span> <span class="n">count</span><span class="p">);</span>
+<span class="p">}</span>
+</code></pre>
+</div>
+
+<p>futex是linux下的快速同步互斥机制，我们用它来实现线程的sleep和awake，并用队列保存线程的进入次序，避免了线程的饿死。</p>
+
+  </div>
+
+  
+</article>
+
+      </div>
+    </main>
+
+    <footer class="site-footer">
+
+  <div class="wrapper">
+
+    <h2 class="footer-heading">prototype</h2>
+
+    <div class="footer-col-wrapper">
+      <div class="footer-col footer-col-1">
+        <ul class="contact-list">
+          <li>
+            
+              prototype
+            
+            </li>
+            
+            <li><a href="mailto:gao_chenfei@163.com">gao_chenfei@163.com</a></li>
+            
+        </ul>
+      </div>
+
+      <div class="footer-col footer-col-2">
+        <ul class="social-media-list">
+          
+          <li>
+            <a href="https://github.com/flex1988"><span class="icon icon--github"><svg viewBox="0 0 16 16" width="16px" height="16px"><path fill="#828282" d="M7.999,0.431c-4.285,0-7.76,3.474-7.76,7.761 c0,3.428,2.223,6.337,5.307,7.363c0.388,0.071,0.53-0.168,0.53-0.374c0-0.184-0.007-0.672-0.01-1.32 c-2.159,0.469-2.614-1.04-2.614-1.04c-0.353-0.896-0.862-1.135-0.862-1.135c-0.705-0.481,0.053-0.472,0.053-0.472 c0.779,0.055,1.189,0.8,1.189,0.8c0.692,1.186,1.816,0.843,2.258,0.645c0.071-0.502,0.271-0.843,0.493-1.037 C4.86,11.425,3.049,10.76,3.049,7.786c0-0.847,0.302-1.54,0.799-2.082C3.768,5.507,3.501,4.718,3.924,3.65 c0,0,0.652-0.209,2.134,0.796C6.677,4.273,7.34,4.187,8,4.184c0.659,0.003,1.323,0.089,1.943,0.261 c1.482-1.004,2.132-0.796,2.132-0.796c0.423,1.068,0.157,1.857,0.077,2.054c0.497,0.542,0.798,1.235,0.798,2.082 c0,2.981-1.814,3.637-3.543,3.829c0.279,0.24,0.527,0.713,0.527,1.437c0,1.037-0.01,1.874-0.01,2.129 c0,0.208,0.14,0.449,0.534,0.373c3.081-1.028,5.302-3.935,5.302-7.362C15.76,3.906,12.285,0.431,7.999,0.431z"/></svg>
+</span><span class="username">flex1988</span></a>
+
+          </li>
+          
+
+          
+        </ul>
+      </div>
+
+      <div class="footer-col footer-col-3">
+        <p>Write an awesome description for your new site here. You can edit this line in _config.yml. It will appear in your document head meta (for Google search results) and in your feed.xml site description.
+</p>
+      </div>
+    </div>
+
+  </div>
+
+</footer>
+
+
+  </body>
+
+</html>
