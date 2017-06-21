@@ -1,5 +1,187 @@
-<?xml version="1.0" encoding="utf-8"?><?xml-stylesheet type="text/xml" href="/feed.xslt.xml"?><feed xmlns="http://www.w3.org/2005/Atom"><generator uri="http://jekyllrb.com" version="3.4.0">Jekyll</generator><link href="/feed.xml" rel="self" type="application/atom+xml" /><link href="/" rel="alternate" type="text/html" /><updated>2017-02-20T11:23:45+08:00</updated><id>//</id><title type="html">prototype</title><subtitle>Write an awesome description for your new site here. You can edit this line in _config.yml. It will appear in your document head meta (for Google search results) and in your feed.xml site description.
-</subtitle><entry><title type="html">Linux下锁的原理和实现</title><link href="/linux/kernel/2017/02/19/Linux%E9%94%81%E7%9A%84%E5%8E%9F%E7%90%86%E5%92%8C%E5%AE%9E%E7%8E%B0.html" rel="alternate" type="text/html" title="Linux下锁的原理和实现" /><published>2017-02-19T16:35:00+08:00</published><updated>2017-02-19T16:35:00+08:00</updated><id>/linux/kernel/2017/02/19/Linux%E9%94%81%E7%9A%84%E5%8E%9F%E7%90%86%E5%92%8C%E5%AE%9E%E7%8E%B0</id><content type="html" xml:base="/linux/kernel/2017/02/19/Linux%E9%94%81%E7%9A%84%E5%8E%9F%E7%90%86%E5%92%8C%E5%AE%9E%E7%8E%B0.html">&lt;h3 id=&quot;锁能解决什么问题&quot;&gt;锁能解决什么问题&lt;/h3&gt;
+<?xml version="1.0" encoding="utf-8"?><?xml-stylesheet type="text/xml" href="http://localhost:4000/feed.xslt.xml"?><feed xmlns="http://www.w3.org/2005/Atom"><generator uri="http://jekyllrb.com" version="3.4.0">Jekyll</generator><link href="http://localhost:4000/feed.xml" rel="self" type="application/atom+xml" /><link href="http://localhost:4000/" rel="alternate" type="text/html" /><updated>2017-06-21T21:04:16+08:00</updated><id>http://localhost:4000//</id><title type="html">prototype</title><subtitle>Write an awesome description for your new site here. You can edit this line in _config.yml. It will appear in your document head meta (for Google search results) and in your feed.xml site description.
+</subtitle><entry><title type="html">write在磁盘满时会有性能瓶颈吗？</title><link href="http://localhost:4000/kernel/2017/06/21/write%E5%9C%A8%E7%A3%81%E7%9B%98%E6%BB%A1%E6%97%B6%E4%BC%9A%E6%9C%89%E6%80%A7%E8%83%BD%E7%93%B6%E9%A2%88%E5%90%97.html" rel="alternate" type="text/html" title="write在磁盘满时会有性能瓶颈吗？" /><published>2017-06-21T20:59:07+08:00</published><updated>2017-06-21T20:59:07+08:00</updated><id>http://localhost:4000/kernel/2017/06/21/write%E5%9C%A8%E7%A3%81%E7%9B%98%E6%BB%A1%E6%97%B6%E4%BC%9A%E6%9C%89%E6%80%A7%E8%83%BD%E7%93%B6%E9%A2%88%E5%90%97%3F</id><content type="html" xml:base="http://localhost:4000/kernel/2017/06/21/write%E5%9C%A8%E7%A3%81%E7%9B%98%E6%BB%A1%E6%97%B6%E4%BC%9A%E6%9C%89%E6%80%A7%E8%83%BD%E7%93%B6%E9%A2%88%E5%90%97.html">&lt;h3 id=&quot;背景&quot;&gt;背景&lt;/h3&gt;
+
+&lt;p&gt;最近在测试环境灰度时，业务反应服务无响应，然后马上摘除节点恢复业务。&lt;/p&gt;
+
+&lt;p&gt;到测试机器检查，发现进程存在，日志正常。&lt;/p&gt;
+
+&lt;p&gt;&lt;code class=&quot;highlighter-rouge&quot;&gt;printf &quot;stats\r\n&quot;|nc localhost 10101&lt;/code&gt;&lt;/p&gt;
+
+&lt;p&gt;测试端口发现命令卡住，大约10s才回复。&lt;/p&gt;
+
+&lt;h3 id=&quot;syscallwrite耗时&quot;&gt;syscall:write耗时&lt;/h3&gt;
+
+&lt;p&gt;df -h发现磁盘写满，然而磁盘满会使写磁盘这么慢吗？&lt;/p&gt;
+
+&lt;p&gt;用strace查看每次write耗时&lt;/p&gt;
+
+&lt;p&gt;&lt;img src=&quot;http://ww1.sinaimg.cn/large/7cb11947ly1fgt4c2zmn9j213o0psgx3.jpg&quot; alt=&quot;img&quot; /&gt;&lt;/p&gt;
+
+&lt;p&gt;每次write耗时250ms+…有点长。&lt;/p&gt;
+
+&lt;p&gt;修改代码，把_log函数体注释，重新编译发现服务恢复正常。&lt;/p&gt;
+
+&lt;p&gt;在印象中，感觉磁盘满不可能会导致写文件这么慢啊，有啥问题呢？&lt;/p&gt;
+
+&lt;p&gt;又找了一台新的机器，写了小程序先把磁盘写满，然后启动同样的程序，测试发现一切正常&lt;/p&gt;
+
+&lt;p&gt;&lt;img src=&quot;http://ww1.sinaimg.cn/large/7cb11947ly1fgt4fv7poyj20jm0aotcw.jpg&quot; alt=&quot;img&quot; /&gt;&lt;/p&gt;
+
+&lt;p&gt;这就很有趣了，那么问题在哪呢？&lt;/p&gt;
+
+&lt;h3 id=&quot;ext4&quot;&gt;ext4&lt;/h3&gt;
+
+&lt;p&gt;uname -r发现没有问题的内核版本是3.10.0-229.el7.x86_64，有问题的版本是2.6.32-431.11.2.el6.toa.2.x86_64&lt;/p&gt;
+
+&lt;p&gt;df -T发现文件系统都是ext4，怀疑可能是ext4文件系统某些机制导致的&lt;/p&gt;
+
+&lt;p&gt;使用perf stat查看所有ext4文件系统的trace event&lt;/p&gt;
+
+&lt;p&gt;&lt;code class=&quot;highlighter-rouge&quot;&gt;sudo perf stat -e &quot;ext4:*&quot; -p 23488 sleep 10&lt;/code&gt;&lt;/p&gt;
+
+&lt;ol&gt;
+  &lt;li&gt;
+    &lt;p&gt;有问题的机器&lt;/p&gt;
+
+    &lt;p&gt;&lt;img src=&quot;http://ww1.sinaimg.cn/large/7cb11947ly1fgt4gd89grj20cl0gxjsw.jpg&quot; alt=&quot;img&quot; /&gt;&lt;/p&gt;
+  &lt;/li&gt;
+  &lt;li&gt;
+    &lt;p&gt;没问题的机器&lt;/p&gt;
+
+    &lt;p&gt;&lt;img src=&quot;http://ww1.sinaimg.cn/large/7cb11947ly1fgt4gm73kxj20bw0jsjtb.jpg&quot; alt=&quot;img&quot; /&gt;&lt;/p&gt;
+  &lt;/li&gt;
+&lt;/ol&gt;
+
+&lt;p&gt;发现ext4的执行路径差异很大，然后同时trace ext4和syscall:write&lt;/p&gt;
+
+&lt;p&gt;&lt;code class=&quot;highlighter-rouge&quot;&gt;sudo perf stat -e &quot;syscalls:sys_enter_write,ext4:*&quot; -p 23488 sleep 10&lt;/code&gt;&lt;/p&gt;
+
+&lt;p&gt;&lt;img src=&quot;http://ww1.sinaimg.cn/large/7cb11947ly1fgt4gtu8bqj20bk0h6gn6.jpg&quot; alt=&quot;img&quot; /&gt;&lt;/p&gt;
+
+&lt;p&gt;试了几次发现syscall:write和ext4:ext4_da_write_begin次数完全一样，这说明每次write都会调用ext4的ext4_da_write_begin，但是接下来的执行逻辑就不一样了。&lt;/p&gt;
+
+&lt;h3 id=&quot;内核源码&quot;&gt;内核源码&lt;/h3&gt;
+
+&lt;p&gt;翻内核的源码发现，函数ext4_da_write_begin在3.10和2.6差别很多，用systemtap脚本调试N久，尝试复原ext4_da_write_begin不同的路径&lt;/p&gt;
+
+&lt;div class=&quot;language-c highlighter-rouge&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;&lt;span class=&quot;k&quot;&gt;static&lt;/span&gt; &lt;span class=&quot;kt&quot;&gt;int&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;ext4_da_write_begin&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(){&lt;/span&gt;
+    &lt;span class=&quot;cm&quot;&gt;/*省略*/&lt;/span&gt;
+	&lt;span class=&quot;k&quot;&gt;if&lt;/span&gt; &lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;ret&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;==&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;-&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;ENOSPC&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;&amp;amp;&amp;amp;&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;ext4_should_retry_alloc&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;inode&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;-&amp;gt;&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;i_sb&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;&amp;amp;&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;retries&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;))&lt;/span&gt;
+		&lt;span class=&quot;k&quot;&gt;goto&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;retry&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;;&lt;/span&gt;
+&lt;span class=&quot;n&quot;&gt;out&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;:&lt;/span&gt;
+	&lt;span class=&quot;k&quot;&gt;return&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;ret&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;;&lt;/span&gt;
+&lt;span class=&quot;p&quot;&gt;}&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;
+&lt;/div&gt;
+&lt;p&gt;看到在写满ENOSPC的错误发生时，ext4_should_retry_alloc函数的嫌疑很大，怀疑是触发了不同的逻辑导致低版本内核频繁的重试&lt;/p&gt;
+
+&lt;p&gt;用脚本trace发现在函数ext4_should_retry_alloc里有差异，有问题的机器会去频繁jbd2_journal_force_commit_nested，而没问题的机器直接return 0&lt;/p&gt;
+
+&lt;div class=&quot;language-c highlighter-rouge&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;&lt;span class=&quot;kt&quot;&gt;int&lt;/span&gt; &lt;span class=&quot;nf&quot;&gt;ext4_should_retry_alloc&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;k&quot;&gt;struct&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;super_block&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;*&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;sb&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;kt&quot;&gt;int&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;*&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;retries&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
+&lt;span class=&quot;p&quot;&gt;{&lt;/span&gt;
+	&lt;span class=&quot;k&quot;&gt;if&lt;/span&gt; &lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;!&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;ext4_has_free_blocks&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;EXT4_SB&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;sb&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;),&lt;/span&gt; &lt;span class=&quot;mi&quot;&gt;1&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;||&lt;/span&gt;
+	    &lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;*&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;retries&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;++&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;&amp;gt;&lt;/span&gt; &lt;span class=&quot;mi&quot;&gt;3&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;||&lt;/span&gt;
+	    &lt;span class=&quot;o&quot;&gt;!&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;EXT4_SB&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;sb&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;-&amp;gt;&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;s_journal&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
+		&lt;span class=&quot;k&quot;&gt;return&lt;/span&gt; &lt;span class=&quot;mi&quot;&gt;0&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;;&lt;/span&gt;
+
+	&lt;span class=&quot;n&quot;&gt;jbd_debug&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;mi&quot;&gt;1&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;s&quot;&gt;&quot;%s: retrying operation after ENOSPC&lt;/span&gt;&lt;span class=&quot;se&quot;&gt;\n&lt;/span&gt;&lt;span class=&quot;s&quot;&gt;&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;sb&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;-&amp;gt;&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;s_id&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;);&lt;/span&gt;
+
+	&lt;span class=&quot;k&quot;&gt;return&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;jbd2_journal_force_commit_nested&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;EXT4_SB&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;sb&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;-&amp;gt;&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;s_journal&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;);&lt;/span&gt;
+&lt;span class=&quot;p&quot;&gt;}&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;
+&lt;/div&gt;
+
+&lt;p&gt;stap脚本&lt;/p&gt;
+
+&lt;pre&gt;&lt;code class=&quot;language-stp&quot;&gt;global joural
+global ext4
+
+probe module(&quot;ext4&quot;).function(&quot;ext4_da_write_begin&quot;).call {
+    ext4++;
+}
+
+probe module(&quot;jbd2&quot;).function(&quot;jbd2_journal_force_commit_nested&quot;).call {
+    joural++;
+}
+
+probe module(&quot;ext4&quot;).function(&quot;ext4_has_free_clusters&quot;).return {
+   printf(&quot;%x\n&quot;,@cast($sb-&amp;gt;s_fs_info,&quot;ext4_sb_info&quot;)-&amp;gt;s_journal);
+}
+
+probe timer.s(1), end {
+    ansi_clear_screen();
+    printf(&quot;%10s %10s\n&quot;,&quot;ext4_write_begin&quot;,&quot;jbd2_journal_force_commit_nested&quot;);
+    printf(&quot;%10d %10d\n&quot;,ext4,joural);
+}
+&lt;/code&gt;&lt;/pre&gt;
+&lt;ol&gt;
+  &lt;li&gt;
+    &lt;p&gt;有问题的机器&lt;/p&gt;
+
+    &lt;p&gt;&lt;img src=&quot;http://ww1.sinaimg.cn/large/7cb11947ly1fgt4hu91xjj209y00yweg.jpg&quot; alt=&quot;img&quot; /&gt;&lt;/p&gt;
+  &lt;/li&gt;
+  &lt;li&gt;
+    &lt;p&gt;没问题的机器&lt;/p&gt;
+
+    &lt;p&gt;&lt;img src=&quot;http://ww1.sinaimg.cn/large/7cb11947ly1fgt4i3pmzzj20a200w748.jpg&quot; alt=&quot;img&quot; /&gt;&lt;/p&gt;
+  &lt;/li&gt;
+&lt;/ol&gt;
+
+&lt;p&gt;继续往下看&lt;/p&gt;
+
+&lt;div class=&quot;language-c highlighter-rouge&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;&lt;span class=&quot;kt&quot;&gt;int&lt;/span&gt; &lt;span class=&quot;nf&quot;&gt;ext4_has_free_blocks&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;k&quot;&gt;struct&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;ext4_sb_info&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;*&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;sbi&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;s64&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;nblocks&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
+&lt;span class=&quot;p&quot;&gt;{&lt;/span&gt;
+    &lt;span class=&quot;cm&quot;&gt;/* 省略 */&lt;/span&gt;
+	&lt;span class=&quot;cm&quot;&gt;/* Hm, nope.  Are (enough) root reserved blocks available? */&lt;/span&gt;
+	&lt;span class=&quot;k&quot;&gt;if&lt;/span&gt; &lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;sbi&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;-&amp;gt;&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;s_resuid&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;==&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;current_fsuid&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;()&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;||&lt;/span&gt;
+	    &lt;span class=&quot;p&quot;&gt;((&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;sbi&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;-&amp;gt;&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;s_resgid&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;!=&lt;/span&gt; &lt;span class=&quot;mi&quot;&gt;0&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;&amp;amp;&amp;amp;&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;in_group_p&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;sbi&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;-&amp;gt;&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;s_resgid&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;))&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;||&lt;/span&gt;
+	    &lt;span class=&quot;n&quot;&gt;capable&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;CAP_SYS_RESOURCE&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;))&lt;/span&gt; &lt;span class=&quot;p&quot;&gt;{&lt;/span&gt;
+		&lt;span class=&quot;k&quot;&gt;if&lt;/span&gt; &lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;free_blocks&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;&amp;gt;=&lt;/span&gt; &lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;nblocks&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;+&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;dirty_blocks&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;))&lt;/span&gt;
+			&lt;span class=&quot;k&quot;&gt;return&lt;/span&gt; &lt;span class=&quot;mi&quot;&gt;1&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;;&lt;/span&gt;
+	&lt;span class=&quot;p&quot;&gt;}&lt;/span&gt;
+
+	&lt;span class=&quot;k&quot;&gt;return&lt;/span&gt; &lt;span class=&quot;mi&quot;&gt;0&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;;&lt;/span&gt;
+&lt;span class=&quot;p&quot;&gt;}&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;
+&lt;/div&gt;
+
+&lt;p&gt;发现在函数ext4_has_free_blocks中会判断是否会有空闲块，决定是不是重试，对比3.10的代码，在3.10中的函数是&lt;/p&gt;
+
+&lt;div class=&quot;language-c highlighter-rouge&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;&lt;span class=&quot;k&quot;&gt;static&lt;/span&gt; &lt;span class=&quot;kt&quot;&gt;int&lt;/span&gt; &lt;span class=&quot;nf&quot;&gt;ext4_has_free_clusters&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;k&quot;&gt;struct&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;ext4_sb_info&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;*&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;sbi&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt;
+				  &lt;span class=&quot;n&quot;&gt;s64&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;nclusters&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;kt&quot;&gt;unsigned&lt;/span&gt; &lt;span class=&quot;kt&quot;&gt;int&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;flags&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
+&lt;span class=&quot;p&quot;&gt;{&lt;/span&gt;
+    &lt;span class=&quot;cm&quot;&gt;/* 省略 */&lt;/span&gt;
+	&lt;span class=&quot;cm&quot;&gt;/* No free blocks. Let's see if we can dip into reserved pool */&lt;/span&gt;
+	&lt;span class=&quot;k&quot;&gt;if&lt;/span&gt; &lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;flags&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;&amp;amp;&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;EXT4_MB_USE_RESERVED&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt; &lt;span class=&quot;p&quot;&gt;{&lt;/span&gt;
+		&lt;span class=&quot;k&quot;&gt;if&lt;/span&gt; &lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;free_clusters&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;&amp;gt;=&lt;/span&gt; &lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;nclusters&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;+&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;dirty_clusters&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;))&lt;/span&gt;
+			&lt;span class=&quot;k&quot;&gt;return&lt;/span&gt; &lt;span class=&quot;mi&quot;&gt;1&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;;&lt;/span&gt;
+	&lt;span class=&quot;p&quot;&gt;}&lt;/span&gt;
+
+	&lt;span class=&quot;k&quot;&gt;return&lt;/span&gt; &lt;span class=&quot;mi&quot;&gt;0&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;;&lt;/span&gt;
+&lt;span class=&quot;p&quot;&gt;}&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;
+&lt;/div&gt;
+
+&lt;p&gt;发现在判断逻辑上的不同，在3.10里，函数ext4_has_free_clusters调用时，flags传入0，所以不考虑root用户的预留空间，而在2.6里会判断用户是否是root用户，假如是root用户，那么在判断空闲块是否够用时会加上root用户的预留空间。&lt;/p&gt;
+
+&lt;h3 id=&quot;验证&quot;&gt;验证&lt;/h3&gt;
+
+&lt;p&gt;这应该是问题所在了，那么也很好验证，在低内核版本上只有root用户才有权限使用预留空间，那么我们用其他用户启动程序，应该就没有这个问题了。&lt;/p&gt;
+
+&lt;p&gt;&lt;img src=&quot;http://ww1.sinaimg.cn/large/7cb11947ly1fgt4h0iadkj20jp092q5y.jpg&quot; alt=&quot;img&quot; /&gt;&lt;/p&gt;
+
+&lt;p&gt;重新用非root用户启动程序，strace查看，完全正常。&lt;/p&gt;
+
+&lt;h3 id=&quot;总结&quot;&gt;总结&lt;/h3&gt;
+
+&lt;p&gt;那么这个问题就是由于低版本的内核文件系统某些缺陷导致的，但是线上的内核版本不一，假如由于某些问题或者其他进程把磁盘刷爆，那么很有可能导致服务不可用。&lt;/p&gt;
+
+&lt;p&gt;预防措施：&lt;/p&gt;
+
+&lt;ol&gt;
+  &lt;li&gt;对日志增加监控，防止出现日志把磁盘刷爆的情况&lt;/li&gt;
+  &lt;li&gt;尽量用非root用户启动进程&lt;/li&gt;
+&lt;/ol&gt;</content><summary type="html">背景</summary></entry><entry><title type="html">Linux下锁的原理和实现</title><link href="http://localhost:4000/linux/kernel/2017/02/19/Linux%E9%94%81%E7%9A%84%E5%8E%9F%E7%90%86%E5%92%8C%E5%AE%9E%E7%8E%B0.html" rel="alternate" type="text/html" title="Linux下锁的原理和实现" /><published>2017-02-19T16:35:00+08:00</published><updated>2017-02-19T16:35:00+08:00</updated><id>http://localhost:4000/linux/kernel/2017/02/19/Linux%E9%94%81%E7%9A%84%E5%8E%9F%E7%90%86%E5%92%8C%E5%AE%9E%E7%8E%B0</id><content type="html" xml:base="http://localhost:4000/linux/kernel/2017/02/19/Linux%E9%94%81%E7%9A%84%E5%8E%9F%E7%90%86%E5%92%8C%E5%AE%9E%E7%8E%B0.html">&lt;h3 id=&quot;锁能解决什么问题&quot;&gt;锁能解决什么问题&lt;/h3&gt;
 
 &lt;p&gt;在讨论锁的实现机制之前，我们可能需要知道为什么需要锁，锁能解决什么问题？&lt;/p&gt;
 
@@ -290,7 +472,7 @@
 &lt;/code&gt;&lt;/pre&gt;
 &lt;/div&gt;
 
-&lt;p&gt;futex是linux下的快速同步互斥机制，我们用它来实现线程的sleep和awake，并用队列保存线程的进入次序，避免了线程的饿死。&lt;/p&gt;</content><summary type="html">锁能解决什么问题</summary></entry><entry><title type="html">Write每次最多能写多少字节的数据</title><link href="/kernel/2016/10/21/how-many-bytes-can-write-once.html" rel="alternate" type="text/html" title="Write每次最多能写多少字节的数据" /><published>2016-10-21T14:29:07+08:00</published><updated>2016-10-21T14:29:07+08:00</updated><id>/kernel/2016/10/21/how-many-bytes-can-write-once</id><content type="html" xml:base="/kernel/2016/10/21/how-many-bytes-can-write-once.html">&lt;h3 id=&quot;背景&quot;&gt;背景&lt;/h3&gt;
+&lt;p&gt;futex是linux下的快速同步互斥机制，我们用它来实现线程的sleep和awake，并用队列保存线程的进入次序，避免了线程的饿死。&lt;/p&gt;</content><summary type="html">锁能解决什么问题</summary></entry><entry><title type="html">Write每次最多能写多少字节的数据</title><link href="http://localhost:4000/kernel/2016/10/21/how-many-bytes-can-write-once.html" rel="alternate" type="text/html" title="Write每次最多能写多少字节的数据" /><published>2016-10-21T14:29:07+08:00</published><updated>2016-10-21T14:29:07+08:00</updated><id>http://localhost:4000/kernel/2016/10/21/how-many-bytes-can-write-once</id><content type="html" xml:base="http://localhost:4000/kernel/2016/10/21/how-many-bytes-can-write-once.html">&lt;h3 id=&quot;背景&quot;&gt;背景&lt;/h3&gt;
 
 &lt;p&gt;最近碰到一个线上的bug，具体情况是进程将24G左右的内存buffer写到磁盘上，但是每次write都写不完24G，然后重试导致磁盘写满，服务不可用。&lt;/p&gt;
 
