@@ -1,5 +1,5 @@
-<?xml version="1.0" encoding="utf-8"?><?xml-stylesheet type="text/xml" href="http://localhost:4000/feed.xslt.xml"?><feed xmlns="http://www.w3.org/2005/Atom"><generator uri="http://jekyllrb.com" version="3.4.0">Jekyll</generator><link href="http://localhost:4000/feed.xml" rel="self" type="application/atom+xml" /><link href="http://localhost:4000/" rel="alternate" type="text/html" /><updated>2017-06-21T21:04:16+08:00</updated><id>http://localhost:4000//</id><title type="html">prototype</title><subtitle>Write an awesome description for your new site here. You can edit this line in _config.yml. It will appear in your document head meta (for Google search results) and in your feed.xml site description.
-</subtitle><entry><title type="html">write在磁盘满时会有性能瓶颈吗？</title><link href="http://localhost:4000/kernel/2017/06/21/write%E5%9C%A8%E7%A3%81%E7%9B%98%E6%BB%A1%E6%97%B6%E4%BC%9A%E6%9C%89%E6%80%A7%E8%83%BD%E7%93%B6%E9%A2%88%E5%90%97.html" rel="alternate" type="text/html" title="write在磁盘满时会有性能瓶颈吗？" /><published>2017-06-21T20:59:07+08:00</published><updated>2017-06-21T20:59:07+08:00</updated><id>http://localhost:4000/kernel/2017/06/21/write%E5%9C%A8%E7%A3%81%E7%9B%98%E6%BB%A1%E6%97%B6%E4%BC%9A%E6%9C%89%E6%80%A7%E8%83%BD%E7%93%B6%E9%A2%88%E5%90%97%3F</id><content type="html" xml:base="http://localhost:4000/kernel/2017/06/21/write%E5%9C%A8%E7%A3%81%E7%9B%98%E6%BB%A1%E6%97%B6%E4%BC%9A%E6%9C%89%E6%80%A7%E8%83%BD%E7%93%B6%E9%A2%88%E5%90%97.html">&lt;h3 id=&quot;背景&quot;&gt;背景&lt;/h3&gt;
+<?xml version="1.0" encoding="utf-8"?><?xml-stylesheet type="text/xml" href="/feed.xslt.xml"?><feed xmlns="http://www.w3.org/2005/Atom"><generator uri="http://jekyllrb.com" version="3.4.0">Jekyll</generator><link href="/feed.xml" rel="self" type="application/atom+xml" /><link href="/" rel="alternate" type="text/html" /><updated>2017-06-22T13:54:20+08:00</updated><id>//</id><title type="html">prototype</title><subtitle>Write an awesome description for your new site here. You can edit this line in _config.yml. It will appear in your document head meta (for Google search results) and in your feed.xml site description.
+</subtitle><entry><title type="html">write在磁盘满时会有性能瓶颈吗？</title><link href="/kernel/2017/06/21/write%E5%9C%A8%E7%A3%81%E7%9B%98%E6%BB%A1%E6%97%B6%E4%BC%9A%E6%9C%89%E6%80%A7%E8%83%BD%E7%93%B6%E9%A2%88%E5%90%97.html" rel="alternate" type="text/html" title="write在磁盘满时会有性能瓶颈吗？" /><published>2017-06-21T20:59:07+08:00</published><updated>2017-06-21T20:59:07+08:00</updated><id>/kernel/2017/06/21/write%E5%9C%A8%E7%A3%81%E7%9B%98%E6%BB%A1%E6%97%B6%E4%BC%9A%E6%9C%89%E6%80%A7%E8%83%BD%E7%93%B6%E9%A2%88%E5%90%97%3F</id><content type="html" xml:base="/kernel/2017/06/21/write%E5%9C%A8%E7%A3%81%E7%9B%98%E6%BB%A1%E6%97%B6%E4%BC%9A%E6%9C%89%E6%80%A7%E8%83%BD%E7%93%B6%E9%A2%88%E5%90%97.html">&lt;h3 id=&quot;背景&quot;&gt;背景&lt;/h3&gt;
 
 &lt;p&gt;最近在测试环境灰度时，业务反应服务无响应，然后马上摘除节点恢复业务。&lt;/p&gt;
 
@@ -164,6 +164,18 @@ probe timer.s(1), end {
 
 &lt;p&gt;发现在判断逻辑上的不同，在3.10里，函数ext4_has_free_clusters调用时，flags传入0，所以不考虑root用户的预留空间，而在2.6里会判断用户是否是root用户，假如是root用户，那么在判断空闲块是否够用时会加上root用户的预留空间。&lt;/p&gt;
 
+&lt;p&gt;写个脚本看一下free_blocks，nblocks，dirty_blocks,root_blocks分别是多少&lt;/p&gt;
+
+&lt;pre&gt;&lt;code class=&quot;language-stp&quot;&gt;probe module(&quot;ext4&quot;).function(&quot;ext4_has_free_blocks&quot;) {
+  printf(&quot;free: %d dirty: %x nblocks: %d root: %d\n&quot;,$sbi-&amp;gt;s_freeblocks_counter-&amp;gt;count,$sbi-&amp;gt;s_dirtyblocks_counter-&amp;gt;count,$nblocks,$sbi-&amp;gt;s_es-&amp;gt;s_r_blocks_count_hi&amp;lt;&amp;lt;32|$sbi-&amp;gt;s_es-&amp;gt;s_free_blocks_count_lo);
+}
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;p&gt;&lt;img src=&quot;http://ww1.sinaimg.cn/large/7cb11947ly1fgtxoumbg3j20bv05fjsm.jpg&quot; alt=&quot;img&quot; /&gt;&lt;/p&gt;
+
+&lt;p&gt;root用户的判断逻辑是free &amp;gt; nblocks + dirty，是true，所以一直在重试
+非root用户的判断逻辑是free &amp;gt; nblocks + dirty + root，是false，所以不会重试&lt;/p&gt;
+
 &lt;h3 id=&quot;验证&quot;&gt;验证&lt;/h3&gt;
 
 &lt;p&gt;这应该是问题所在了，那么也很好验证，在低内核版本上只有root用户才有权限使用预留空间，那么我们用其他用户启动程序，应该就没有这个问题了。&lt;/p&gt;
@@ -181,7 +193,7 @@ probe timer.s(1), end {
 &lt;ol&gt;
   &lt;li&gt;对日志增加监控，防止出现日志把磁盘刷爆的情况&lt;/li&gt;
   &lt;li&gt;尽量用非root用户启动进程&lt;/li&gt;
-&lt;/ol&gt;</content><summary type="html">背景</summary></entry><entry><title type="html">Linux下锁的原理和实现</title><link href="http://localhost:4000/linux/kernel/2017/02/19/Linux%E9%94%81%E7%9A%84%E5%8E%9F%E7%90%86%E5%92%8C%E5%AE%9E%E7%8E%B0.html" rel="alternate" type="text/html" title="Linux下锁的原理和实现" /><published>2017-02-19T16:35:00+08:00</published><updated>2017-02-19T16:35:00+08:00</updated><id>http://localhost:4000/linux/kernel/2017/02/19/Linux%E9%94%81%E7%9A%84%E5%8E%9F%E7%90%86%E5%92%8C%E5%AE%9E%E7%8E%B0</id><content type="html" xml:base="http://localhost:4000/linux/kernel/2017/02/19/Linux%E9%94%81%E7%9A%84%E5%8E%9F%E7%90%86%E5%92%8C%E5%AE%9E%E7%8E%B0.html">&lt;h3 id=&quot;锁能解决什么问题&quot;&gt;锁能解决什么问题&lt;/h3&gt;
+&lt;/ol&gt;</content><summary type="html">背景</summary></entry><entry><title type="html">Linux下锁的原理和实现</title><link href="/linux/kernel/2017/02/19/Linux%E9%94%81%E7%9A%84%E5%8E%9F%E7%90%86%E5%92%8C%E5%AE%9E%E7%8E%B0.html" rel="alternate" type="text/html" title="Linux下锁的原理和实现" /><published>2017-02-19T16:35:00+08:00</published><updated>2017-02-19T16:35:00+08:00</updated><id>/linux/kernel/2017/02/19/Linux%E9%94%81%E7%9A%84%E5%8E%9F%E7%90%86%E5%92%8C%E5%AE%9E%E7%8E%B0</id><content type="html" xml:base="/linux/kernel/2017/02/19/Linux%E9%94%81%E7%9A%84%E5%8E%9F%E7%90%86%E5%92%8C%E5%AE%9E%E7%8E%B0.html">&lt;h3 id=&quot;锁能解决什么问题&quot;&gt;锁能解决什么问题&lt;/h3&gt;
 
 &lt;p&gt;在讨论锁的实现机制之前，我们可能需要知道为什么需要锁，锁能解决什么问题？&lt;/p&gt;
 
@@ -472,7 +484,7 @@ probe timer.s(1), end {
 &lt;/code&gt;&lt;/pre&gt;
 &lt;/div&gt;
 
-&lt;p&gt;futex是linux下的快速同步互斥机制，我们用它来实现线程的sleep和awake，并用队列保存线程的进入次序，避免了线程的饿死。&lt;/p&gt;</content><summary type="html">锁能解决什么问题</summary></entry><entry><title type="html">Write每次最多能写多少字节的数据</title><link href="http://localhost:4000/kernel/2016/10/21/how-many-bytes-can-write-once.html" rel="alternate" type="text/html" title="Write每次最多能写多少字节的数据" /><published>2016-10-21T14:29:07+08:00</published><updated>2016-10-21T14:29:07+08:00</updated><id>http://localhost:4000/kernel/2016/10/21/how-many-bytes-can-write-once</id><content type="html" xml:base="http://localhost:4000/kernel/2016/10/21/how-many-bytes-can-write-once.html">&lt;h3 id=&quot;背景&quot;&gt;背景&lt;/h3&gt;
+&lt;p&gt;futex是linux下的快速同步互斥机制，我们用它来实现线程的sleep和awake，并用队列保存线程的进入次序，避免了线程的饿死。&lt;/p&gt;</content><summary type="html">锁能解决什么问题</summary></entry><entry><title type="html">Write每次最多能写多少字节的数据</title><link href="/kernel/2016/10/21/how-many-bytes-can-write-once.html" rel="alternate" type="text/html" title="Write每次最多能写多少字节的数据" /><published>2016-10-21T14:29:07+08:00</published><updated>2016-10-21T14:29:07+08:00</updated><id>/kernel/2016/10/21/how-many-bytes-can-write-once</id><content type="html" xml:base="/kernel/2016/10/21/how-many-bytes-can-write-once.html">&lt;h3 id=&quot;背景&quot;&gt;背景&lt;/h3&gt;
 
 &lt;p&gt;最近碰到一个线上的bug，具体情况是进程将24G左右的内存buffer写到磁盘上，但是每次write都写不完24G，然后重试导致磁盘写满，服务不可用。&lt;/p&gt;
 
