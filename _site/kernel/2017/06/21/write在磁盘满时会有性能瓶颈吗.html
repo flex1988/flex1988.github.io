@@ -240,8 +240,9 @@ probe timer.s(1), end {
 
 <p><img src="http://ww1.sinaimg.cn/large/7cb11947ly1fgtxoumbg3j20bv05fjsm.jpg" alt="img" /></p>
 
-<p>root用户的判断逻辑是free &gt; nblocks + dirty，是true，所以一直在重试
-非root用户的判断逻辑是free &gt; nblocks + dirty + root，是false，所以不会重试</p>
+<p>root用户的判断逻辑是free &gt; nblocks + dirty，是true，所以一直在重试</p>
+
+<p>非root用户的判断逻辑是free &gt; nblocks + dirty + root，是false，所以不会重试</p>
 
 <h3 id="验证">验证</h3>
 
