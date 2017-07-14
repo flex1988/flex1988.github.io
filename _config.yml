@@ -17,7 +17,7 @@ title: prototype
 layout: default
 email: gao_chenfei@163.com
 description: > # this means to ignore newlines until "baseurl:"
-    愿无岁月可回头
+    Worse is better
 baseurl: "" # the subpath of your site, e.g. /blog
 url: "" # the base hostname & protocol for your site, e.g. http://example.com
 github_username:  flex1988
