@@ -10,7 +10,7 @@
   <meta name="description" content="内存管理-内存分页">
 
   <link rel="stylesheet" href="/assets/main.css">
-  <link rel="canonical" href="http://localhost:4000/kernel/2017/08/25/%E5%86%85%E5%AD%98%E5%88%86%E9%A1%B5.html">
+  <link rel="canonical" href="/kernel/2017/08/25/%E5%86%85%E5%AD%98%E5%88%86%E9%A1%B5.html">
   <link rel="alternate" type="application/rss+xml" title="prototype" href="/feed.xml">
   
   
@@ -133,6 +133,19 @@
     <p>取entry2的前20位加上内存地址p的后12位组成的物理地址为真正的物理地址，内存地址转换完成</p>
   </li>
 </ol>
+
+<div class="language-c highlighter-rouge"><pre class="highlight"><code><span class="kt">uint32_t</span> <span class="nf">virt_to_phys</span><span class="p">(</span><span class="kt">uint32_t</span> <span class="n">virtualaddr</span><span class="p">)</span> <span class="p">{</span>
+    <span class="kt">int</span> <span class="n">pdidx</span> <span class="o">=</span> <span class="n">virtualaddr</span> <span class="o">&gt;&gt;</span> <span class="mi">22</span><span class="p">;</span>
+    <span class="kt">int</span> <span class="n">ptidx</span> <span class="o">=</span> <span class="n">virtualaddr</span> <span class="o">&gt;&gt;</span> <span class="mi">12</span> <span class="o">&amp;</span> <span class="mh">0x03ff</span><span class="p">;</span>
+    <span class="kt">int</span> <span class="n">offset</span> <span class="o">=</span> <span class="n">virtualaddr</span> <span class="o">&amp;</span> <span class="mh">0xfff</span><span class="p">;</span>
+
+    <span class="n">page_tabl_t</span><span class="o">*</span> <span class="n">tabl</span> <span class="o">=</span> <span class="n">_kernel_pd</span><span class="o">-&gt;</span><span class="n">tabls</span><span class="p">[</span><span class="n">pdidx</span><span class="p">];</span>
+    <span class="n">page_t</span><span class="o">*</span> <span class="n">page</span> <span class="o">=</span> <span class="o">&amp;</span><span class="n">tabl</span><span class="o">-&gt;</span><span class="n">pages</span><span class="p">[</span><span class="n">ptidx</span><span class="p">];</span>
+
+    <span class="k">return</span> <span class="n">page</span><span class="o">-&gt;</span><span class="n">addr</span> <span class="o">&lt;&lt;</span> <span class="mi">12</span> <span class="o">+</span> <span class="n">offset</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre>
+</div>
 
 <h4 id="4page-faults">4.Page Faults</h4>
 
